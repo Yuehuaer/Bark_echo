@@ -228,6 +228,10 @@ class MessageListViewModel: ViewModel, ViewModelType {
             return BehaviorRelay<[String?]>(value: [])
         }()
         
+        // 使用 asyncInstance 调度 searchText，避免阻塞启动
+        let searchText = input.searchText
+            .observe(on: MainScheduler.asyncInstance)
+        
         // 切换分组时，更新分组名
         filterGroups
             .subscribe(onNext: { filterGroups in
@@ -240,7 +244,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
         
         // 切换分组和更改搜索词时，更新数据源
         Observable
-            .combineLatest(filterGroups, input.searchText)
+            .combineLatest(filterGroups, searchText)
             .subscribe(onNext: { [weak self] groups, searchText in
                 self?.searchText = searchText ?? ""
                 self?.results = self?.getResults(filterGroups: groups, searchText: searchText)
@@ -260,7 +264,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
         Observable
             .merge(
                 input.refresh.asObservable().map { () },
-                input.searchText.asObservable().map { _ in () },
+                searchText.map { _ in () },
                 messageTypeChanged.asObservable().map { _ in () }
             )
             .subscribe(onNext: { [weak self] in
@@ -319,7 +323,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
                     try? realm.write {
                         realm.delete(message)
                     }
-                    WidgetHistorySnapshotStore.shared.syncFromMessages(realm.widgetSnapshotItems())
+                    WidgetHistorySnapshotStore.shared.refreshFromRealmAsync()
                 }
                 // 删除 cell item
                 section.messages.removeAll { cellItem in
@@ -341,7 +345,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
                         try? realm.write {
                             realm.delete(messageResult)
                         }
-                        WidgetHistorySnapshotStore.shared.syncFromMessages(realm.widgetSnapshotItems())
+                        WidgetHistorySnapshotStore.shared.refreshFromRealmAsync()
                     }
                 }
                 // 删除 cell item
@@ -373,7 +377,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
                 try? realm.write {
                     realm.delete(message)
                 }
-                WidgetHistorySnapshotStore.shared.syncFromMessages(realm.widgetSnapshotItems())
+                WidgetHistorySnapshotStore.shared.refreshFromRealmAsync()
             }
             
             if let index = section.messages.firstIndex(where: { item in
@@ -412,7 +416,7 @@ class MessageListViewModel: ViewModel, ViewModelType {
                 try? realm.write {
                     realm.delete(messages)
                 }
-                WidgetHistorySnapshotStore.shared.syncFromMessages(realm.widgetSnapshotItems())
+                WidgetHistorySnapshotStore.shared.refreshFromRealmAsync()
             }
             
             self.page = 0

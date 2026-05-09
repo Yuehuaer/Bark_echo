@@ -68,13 +68,6 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
         tableView.backgroundColor = BKColor.background.primary
         tableView.register(MessageTableViewCell.self, forCellReuseIdentifier: "\(MessageTableViewCell.self)")
         tableView.register(MessageGroupTableViewCell.self, forCellReuseIdentifier: "\(MessageGroupTableViewCell.self)")
-        // 设置了这个后，第一次进页面 LargeTitle 就会收缩成小标题，不设置这个LargeTitle就是大标题显示
-        // 谁特么能整的明白这个？
-        // tableView.contentInset = UIEdgeInsets(top: 20, left: 0, bottom: 0, right: 0)
-        
-        // 替代 contentInset 设置一个 header
-        tableView.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 20))
-        
         tableView.rx.setDelegate(self).disposed(by: rx.disposeBag)
         tableView.mj_footer = MJRefreshAutoFooter()
         
@@ -94,6 +87,9 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
     private let reloadRelay = PublishRelay<Void>()
     /// 按时间范围清除消息事件流
     private let clearRelay = PublishRelay<MessageDeleteTimeRange>()
+    /// 首屏加载过渡动画
+    private let initialLoadingView = MessageListSkeletonView()
+    private var hasFinishedInitialLoadingTransition = false
 
     override func makeUI() {
         navigationItem.searchController = UISearchController(searchResultsController: nil)
@@ -102,10 +98,16 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
         
         if #available(iOS 26.0, *) {
             navigationItem.preferredSearchBarPlacement = .integratedButton
+            self.tableView.contentInset = UIEdgeInsets(top: 20, left: 0, bottom: 0, right: 0)
         }
         
         self.view.addSubview(tableView)
         tableView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+
+        self.view.addSubview(initialLoadingView)
+        initialLoadingView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
 
@@ -233,6 +235,15 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
         output.messages
             .drive(tableView.rx.items(dataSource: dataSource))
             .disposed(by: rx.disposeBag)
+
+        output.messages
+            .asObservable()
+            .skip(1)
+            .take(1)
+            .observe(on: MainScheduler.instance)
+            .subscribe(onNext: { [weak self] _ in
+                self?.finishInitialLoadingTransition()
+            }).disposed(by: rx.disposeBag)
         
         // 选择群组
         output.type
@@ -247,6 +258,7 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
         // 数据库初始化出错错误提示
         output.errorAlert
             .drive(onNext: { [weak self] error in
+                self?.finishInitialLoadingTransition()
                 let alertController = UIAlertController(title: "Error", message: error, preferredStyle: .alert)
                 alertController.addAction(UIAlertAction(title: "Copy2".localized, style: .default, handler: { _ in
                     UIPasteboard.general.string = error
@@ -353,6 +365,25 @@ class MessageListViewController: BaseViewController<MessageListViewModel> {
     private func scrollToTop() {
         if self.tableView.visibleCells.count > 0 {
             self.tableView.scrollToRow(at: IndexPath(row: 0, section: 0), at: .top, animated: true)
+        }
+    }
+
+    private func finishInitialLoadingTransition() {
+        guard !hasFinishedInitialLoadingTransition else { return }
+        hasFinishedInitialLoadingTransition = true
+
+        guard self.initialLoadingView.superview != nil else {
+            return
+        }
+
+        UIView.animate(
+            withDuration: 0.26,
+            delay: 0,
+            options: [.beginFromCurrentState, .curveEaseOut]
+        ) {
+            self.initialLoadingView.alpha = 0
+        } completion: { _ in
+            self.initialLoadingView.removeFromSuperview()
         }
     }
 }
